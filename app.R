@@ -1,193 +1,158 @@
-# Load packages used by the app. Install missing packages, if needed.
+# app.R
+
 library(shiny)
-library(bslib)
-library(thematic)
 library(tidyverse)
-library(gitlink)
+library(ggExtra) # For marginal histograms
 
-# Read data from a CSV file and perform data preprocessing
-expansions <- read_csv("data/expansions.csv") |>
-  mutate(evaluation = factor(evaluation, levels = c("None", "A", "B")),
-         propensity = factor(propensity, levels = c("Good", "Average", "Poor")))
-
-# Compute expansion rates by trial and group
-expansion_groups <- expansions |>
-  group_by(industry, propensity, contract, evaluation) |>
-  summarize(success_rate = round(mean(outcome == "Won")* 100),
-            avg_amount = round(mean(amount)),
-            avg_days = round(mean(days)),
-            n = n()) |>
-  ungroup()
-
-# Compute expansion rates by trial
-overall_rates <- expansions |>
-  group_by(evaluation) |>
-  summarise(rate = round(mean(outcome == "Won"), 2))
-
-# Restructure expansion rates by trial as a vector
-rates <- structure(overall_rates$rate, names = overall_rates$evaluation)
-
-# Define lists for propensity, contract and industry choices
-propensities <- c("Good", "Average", "Poor")
-contracts <- c("Monthly", "Annual")
-industries <- c("Academia",
-                "Energy",
-                "Finance",
-                "Government",
-                "Healthcare",
-                "Insurance",
-                "Manufacturing",
-                "Non-Profit",
-                "Pharmaceuticals",
-                "Technology")
-
-# Set the default theme for ggplot2 plots
-ggplot2::theme_set(ggplot2::theme_minimal())
-
-# Apply the CSS used by the Shiny app to the ggplot2 plots
-thematic_shiny()
-
-
-# Define the Shiny UI layout
-ui <- page_sidebar(
+# Define UI for application
+ui <- fluidPage(
+  # Application title
+  titlePanel("Progressive Property Taxation Model"),
   
-  # Set CSS theme
-  theme = bs_theme(bootswatch = "darkly",
-                   bg = "#222222",
-                   fg = "#86C7ED",
-                   success ="#86C7ED"),
-  
-  # Add title
-  title = "Effectiveness of DemoCo App Free Trial by Customer Segment",
-  
-  # Add sidebar elements
-  sidebar = sidebar(title = "Select a segment of data to view",
-                    class ="bg-secondary",
-                    selectInput("industry", "Select industries", choices = industries, selected = "", multiple  = TRUE),
-                    selectInput("propensity", "Select propensities to buy", choices = propensities, selected = "", multiple  = TRUE),
-                    selectInput("contract", "Select contract types", choices = contracts, selected = "", multiple  = TRUE),
-                    "This app compares the effectiveness of two types of free trials, A (30-days) and B (100-days), at converting users into customers.",
-                    tags$img(src = "logo.png", width = "100%", height = "auto")),
-  
-  # Layout non-sidebar elements
-  layout_columns(card(card_header("Conversions over time"),
-                      plotOutput("line")),
-                 card(card_header("Conversion rates"),
-                      plotOutput("bar")),
-                 value_box(title = "Recommended Trial",
-                           value = textOutput("recommended_eval"),
-                           theme_color = "secondary"),
-                 value_box(title = "Customers",
-                           value = textOutput("number_of_customers"),
-                           theme_color = "secondary"),
-                 value_box(title = "Avg Spend",
-                           value = textOutput("average_spend"),
-                           theme_color = "secondary"),
-                 card(card_header("Conversion rates by subgroup"),
-                      tableOutput("table")),
-                 col_widths = c(8, 4, 4, 4, 4, 12),
-                 row_heights = c(4, 1.5, 3))
+  # Sidebar with a slider input for the beta parameter
+  sidebarLayout(
+    sidebarPanel(
+      sliderInput("beta_param",
+                  "Log Function Beta Parameter:",
+                  min = -5,
+                  max = 5,
+                  value = 0,
+                  step = 0.1),
+      hr(),
+      p("Adjust the beta parameter to see how it affects the progressive tax system's impact on different home values."),
+      p("A higher beta value generally increases the progressive nature of the tax.")
+    ),
+    
+    # Show a plot of the generated distribution
+    mainPanel(
+      h3("Effective Mill Rate under Progressive Tax"),
+      plotOutput("millRatePlot"),
+      h3("Taxes Due Comparison"),
+      plotOutput("taxesDuePlot"),
+      h3("Change in Taxes (Progressive vs. Flat)"),
+      plotOutput("taxSavingsPlot")
+    )
+  )
 )
 
-# Define the Shiny server function
+# Define server logic required to draw plots
 server <- function(input, output) {
   
-  # Provide default values for industry, propensity, and contract selections
-  selected_industries <- reactive({
-    if (is.null(input$industry)) industries else input$industry
-  })
-  
-  selected_propensities <- reactive({
-    if (is.null(input$propensity)) propensities else input$propensity
-  })
-  
-  selected_contracts <- reactive({
-    if (is.null(input$contract)) contracts else input$contract
-  })
-  
-  # Filter data against selections
-  filtered_expansions <- reactive({
-    expansions |>
-      filter(industry %in% selected_industries(),
-             propensity %in% selected_propensities(),
-             contract %in% selected_contracts())
-  })
-  
-  # Compute conversions by month
-  conversions <- reactive({
-    filtered_expansions() |>
-      mutate(date = floor_date(date, unit = "month")) |>
-      group_by(date, evaluation) |>
-      summarize(n = sum(outcome == "Won")) |>
-      ungroup()
-  })
-  
-  # Retrieve conversion rates for selected groups
-  groups <- reactive({
-    expansion_groups |>
-      filter(industry %in% selected_industries(),
-             propensity %in% selected_propensities(),
-             contract %in% selected_contracts())
-  })
-  
-  # Render text for recommended trial
-  output$recommended_eval <- renderText({
-    recommendation <-
-      filtered_expansions() |>
-      group_by(evaluation) |>
-      summarise(rate = mean(outcome == "Won")) |>
-      filter(rate == max(rate)) |>
-      pull(evaluation)
+  # Reactive expression to perform calculations based on input$beta_param
+  tax_data <- reactive({
+    beta_val <- input$beta_param # Get the beta value from the slider
     
-    as.character(recommendation[1])
-  })
-  
-  # Render text for number of customers
-  output$number_of_customers <- renderText({
-    sum(filtered_expansions()$outcome == "Won") |>
-      format(big.mark = ",")
-  })
-  
-  # Render text for average spend
-  output$average_spend <- renderText({
-    x <-
-      filtered_expansions() |>
-      filter(outcome == "Won") |>
-      summarise(spend = round(mean(amount))) |>
-      pull(spend)
+    # Model parameters (can also be made interactive if desired)
+    households <- 4569 * 2 # * 2 to account for businesses
+    median_home_price <- 249900
+    tax_valuation <- .7
+    home_price_standard_deviation <- 35000
+    target_revenue <- 47000000
     
-    str_glue("${x}")
+    set.seed(1) # Ensure reproducibility
+    home_values <- rnorm(
+      n = households,
+      mean = median_home_price,
+      sd = home_price_standard_deviation
+    )
+    
+    df <- data.frame(home_values = home_values) %>%
+      mutate(home_tax_value = tax_valuation * home_values) %>%
+      arrange(home_values)
+    
+    # Calculate flat mill rate
+    flat_mill_rate <- target_revenue / sum(df$home_tax_value)
+    
+    # Function to calculate the adjustment term for progressive tax
+    # This function now includes the beta parameter
+    f_progressive <- function(home_tax_value, target_revenue, beta_param) {
+      target_revenue / sum(home_tax_value * (log(home_tax_value) + beta_param))
+    }
+    
+    # Calculate adjustment term based on the current beta value
+    adjustment_term <- f_progressive(df$home_tax_value, target_revenue, beta_val)
+    
+    # Calculate progressive taxes and related metrics
+    df_final <- df %>%
+      mutate(
+        # Apply the beta parameter in the progressive tax calculation
+        progressive_taxes = adjustment_term * home_tax_value * (log(home_tax_value) + beta_val),
+        progressive_tax_rate = progressive_taxes / home_tax_value,
+        progressive_mill_rate = 1000 * progressive_tax_rate, # Multiplied by 1000
+        taxes_at_flat_mill = home_tax_value * flat_mill_rate,
+        tax_savings = progressive_taxes - taxes_at_flat_mill
+      )
+    
+    # Ensure that target revenue is met (for verification, not used in plotting directly)
+    # sum(df_final$progressive_taxes) # Should be close to target_revenue
+    
+    list(df = df_final, flat_mill_rate = flat_mill_rate, target_revenue = target_revenue)
   })
   
-  # Render line plot for conversions over time
-  output$line <- renderPlot({
-    ggplot(conversions(), aes(x = date, y = n, color = evaluation)) +
+  # Render Plot 1: Effective Mill Rate
+  output$millRatePlot <- renderPlot({
+    data <- tax_data()$df
+    flat_mill <- tax_data()$flat_mill_rate
+    
+    gg <- ggplot(data, aes(x = home_values, y = progressive_mill_rate)) +
       geom_line() +
-      theme(axis.title = element_blank()) +
-      labs(color = "Trial Type")
+      geom_point(alpha = 0.5) +
+      xlab('Assessed home value ($)') +
+      ylab('Effective mill rate (per $1000)') +
+      geom_hline(yintercept = flat_mill * 1000, lty = 2, color = 'red') + # Multiplied by 1000
+      scale_x_continuous(labels = scales::dollar_format(), breaks = seq(0, max(data$home_values), by = 50000)) +
+      ggtitle('Effective Mill Rate under progressive tax',
+              paste0('vs flat ', round(flat_mill * 1000, 2), ' mill')) + # Multiplied by 1000
+      theme_minimal() +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1)) # Rotate x-axis labels for readability
+    
+    ggMarginal(gg, type = 'histogram', margins = 'x') # Only x-axis histogram for clarity
   })
   
-  # Render bar plot for conversion rates by subgroup
-  output$bar <- renderPlot({
-    groups() |>
-      group_by(evaluation) |>
-      summarise(rate = round(sum(n * success_rate) / sum(n), 2)) |>
-      ggplot(aes(x = evaluation, y = rate, fill = evaluation)) +
-      geom_col() +
-      guides(fill = "none") +
-      theme(axis.title = element_blank()) +
-      scale_y_continuous(limits = c(0, 100))
+  # Render Plot 2: Taxes Due Comparison
+  output$taxesDuePlot <- renderPlot({
+    data <- tax_data()$df
+    flat_mill <- tax_data()$flat_mill_rate
+    
+    gg <- data %>%
+      select(home_values, progressive_taxes, taxes_at_flat_mill) %>%
+      pivot_longer(cols = c(progressive_taxes, taxes_at_flat_mill), names_to = "tax_type", values_to = "taxes_due") %>%
+      ggplot(aes(x = home_values, y = taxes_due, color = tax_type)) +
+      geom_point(alpha = 0.5) +
+      geom_line() +
+      scale_color_manual(values = c("progressive_taxes" = "blue", "taxes_at_flat_mill" = "red"),
+                         labels = c("progressive_taxes" = "Progressive Tax", "taxes_at_flat_mill" = "Flat Mill Tax")) +
+      xlab('Assessed home value ($)') +
+      ylab('Taxes due ($)') +
+      scale_x_continuous(labels = scales::dollar_format(), breaks = seq(0, max(data$home_values), by = 50000)) +
+      scale_y_continuous(labels = scales::dollar_format()) +
+      ggtitle('Taxes due',
+              paste0('comparing progressive tax with ', round(flat_mill * 1000, 2), ' mill')) + # Multiplied by 1000
+      theme_minimal() +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))
+    
+    ggMarginal(gg, type = 'histogram', margins = 'x') # Only x-axis histogram for clarity
   })
   
-  # Render table for conversion rates by subgroup
-  output$table <- renderTable({
-    groups() |>
-      select(industry, propensity, contract, evaluation, success_rate) |>
-      pivot_wider(names_from = evaluation, values_from = success_rate)
-  },
-  digits = 0)
+  # Render Plot 3: Change in Taxes
+  output$taxSavingsPlot <- renderPlot({
+    data <- tax_data()$df
+    
+    gg <- ggplot(data, aes(x = home_values, y = tax_savings)) +
+      geom_line() +
+      geom_point(alpha = 0.5) +
+      xlab('Assessed home value ($)') +
+      ylab('Change in taxes (Progressive - Flat) ($)') +
+      geom_hline(yintercept = 0, lty = 2, color = 'grey') +
+      scale_x_continuous(labels = scales::dollar_format(), breaks = seq(0, max(data$home_values), by = 50000)) +
+      scale_y_continuous(labels = scales::dollar_format()) +
+      ggtitle('Change in Taxes (Progressive vs. Flat)') +
+      theme_minimal() +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))
+    
+    ggMarginal(gg, type = 'histogram', margins = 'x') # Only x-axis histogram for clarity
+  })
 }
 
-# Create the Shiny app
+# Run the application
 shinyApp(ui = ui, server = server)
-
