@@ -38,6 +38,24 @@ ui <- fluidPage(
 # Define server logic required to draw plots
 server <- function(input, output) {
   
+  # Define helper functions within the server scope but outside reactive expressions.
+  # These functions will be accessible by any reactive or output within this server instance.
+  
+  # Function to calculate the progressive term for a given home tax value and beta
+  # This encapsulates: home_tax_value * (log(home_tax_value) + beta_param)
+  calculate_progressive_term <- function(home_tax_value, beta_param) {
+    home_tax_value * (log(home_tax_value) + beta_param)
+  }
+  
+  # Function to calculate the adjustment term for the progressive tax
+  # This ensures the total revenue target is met.
+  f_progressive_adjustment <- function(home_tax_value_vector, target_revenue, beta_param) {
+    # Sum of the progressive terms for all homes, used in the denominator
+    sum_of_progressive_terms <- sum(calculate_progressive_term(home_tax_value_vector, beta_param))
+    target_revenue / sum_of_progressive_terms
+  }
+  
+  
   # Reactive expression to perform calculations based on input$beta_param
   tax_data <- reactive({
     beta_val <- input$beta_param # Get the beta value from the slider
@@ -63,28 +81,19 @@ server <- function(input, output) {
     # Calculate flat mill rate
     flat_mill_rate <- target_revenue / sum(df$home_tax_value)
     
-    # Function to calculate the adjustment term for progressive tax
-    # This function now includes the beta parameter
-    f_progressive <- function(home_tax_value, target_revenue, beta_param) {
-      target_revenue / sum(home_tax_value * (log(home_tax_value) + beta_param))
-    }
+    # Calculate adjustment term using the newly defined function
+    adjustment_term <- f_progressive_adjustment(df$home_tax_value, target_revenue, beta_val)
     
-    # Calculate adjustment term based on the current beta value
-    adjustment_term <- f_progressive(df$home_tax_value, target_revenue, beta_val)
-    
-    # Calculate progressive taxes and related metrics
+    # Calculate progressive taxes and related metrics using the newly defined function
     df_final <- df %>%
       mutate(
         # Apply the beta parameter in the progressive tax calculation
-        progressive_taxes = adjustment_term * home_tax_value * (log(home_tax_value) + beta_val),
+        progressive_taxes = adjustment_term * calculate_progressive_term(home_tax_value, beta_val),
         progressive_tax_rate = progressive_taxes / home_tax_value,
         progressive_mill_rate = 1000 * progressive_tax_rate, # Multiplied by 1000
         taxes_at_flat_mill = home_tax_value * flat_mill_rate,
         tax_savings = progressive_taxes - taxes_at_flat_mill
       )
-    
-    # Ensure that target revenue is met (for verification, not used in plotting directly)
-    # sum(df_final$progressive_taxes) # Should be close to target_revenue
     
     list(df = df_final, flat_mill_rate = flat_mill_rate, target_revenue = target_revenue)
   })
