@@ -44,7 +44,7 @@ server <- function(input, output) {
   # Function to calculate the progressive term for a given home tax value and beta
   # This encapsulates: home_tax_value * (log(home_tax_value) + beta_param)
   calculate_progressive_term <- function(home_tax_value, beta_param) {
-    home_tax_value * (log(home_tax_value) + beta_param)
+    home_tax_value * (log(home_tax_value, exp(beta_param)))
   }
   
   # Function to calculate the adjustment term for the progressive tax
