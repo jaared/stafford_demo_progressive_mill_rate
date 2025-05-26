@@ -68,9 +68,9 @@ server <- function(input, output) {
   # --- Data Import ---
   # Read data from CSV file
   # Assuming 'fake_stafford_ct_property_values.csv' is in the same directory as app.R
-  stafford_data_raw <- read_csv("fake_stafford_ct_property_values.csv", show_col_types = FALSE)
+  stafford_data_raw <- read_csv(file.path('data', "fake_stafford_ct_property_values.csv"), show_col_types = FALSE)
   
-  # NEW: Filter out any rows with non-positive Appraised_Value or Assessed_Value
+  # Filter out any rows with non-positive Appraised_Value or Assessed_Value
   # These values would cause issues with log transformations or division by zero,
   # leading to NaN/Inf in calculations and plot errors.
   stafford_data_filtered <- stafford_data_raw %>%
@@ -79,7 +79,7 @@ server <- function(input, output) {
   # Calculate tax_valuation_ratio from the FILTERED imported data
   tax_valuation_ratio <- sum(stafford_data_filtered$Assessed_Value) / sum(stafford_data_filtered$Appraised_Value)
   
-  # UPDATED: target_revenue now calculated from the sum of Assessed_Value and mill_rate_25_26
+  # target_revenue now calculated from the sum of Assessed_Value and mill_rate_25_26
   target_revenue <- sum(stafford_data_filtered$Assessed_Value) * (mill_rate_25_26 / mill_multiplier)
   
   # Initial static dataframe for PLOTTING (base data from imported values)
@@ -173,18 +173,10 @@ server <- function(input, output) {
     # Access the reactive dataframe for plots
     data <- reactive_plot_df() %>%
       arrange(appraised_value) %>%
-      # NEW: Filter out NA/NaN values in the relevant columns before plotting
+      # Filter out NA/NaN values in the relevant columns before plotting
       filter(!is.na(progressive_mill_rate), !is.nan(progressive_mill_rate),
              !is.na(appraised_value), !is.nan(appraised_value))
     req(nrow(data) > 0)
-    
-    # Calculate x-axis limits based on quantiles
-    x_min <- quantile(data$appraised_value, 0.025)
-    x_max <- quantile(data$appraised_value, 0.975)
-    
-    # Calculate y-axis limits based on quantiles
-    y_min <- quantile(data$progressive_mill_rate, 0.025)
-    y_max <- quantile(data$progressive_mill_rate, 0.975)
     
     # Main plot (line only)
     gg_main <- ggplot(data, aes(x = appraised_value, y = progressive_mill_rate)) +
@@ -193,11 +185,9 @@ server <- function(input, output) {
       ylab(paste0('Effective mill rate (per $', mill_multiplier, ')')) +
       geom_hline(yintercept = flat_mill_rate_val * mill_multiplier, lty = 2, color = 'red', linewidth = 1) +
       scale_x_continuous(labels = scales::dollar_format(),
-                         breaks = scales::pretty_breaks(n = 8),
-                         limits = c(x_min, x_max)) + # Apply quantile limits
+                         breaks = scales::pretty_breaks(n = 8)) + # Removed limits
       scale_y_continuous(labels = scales::number_format(accuracy = 0.01), # Format as number with 2 decimal places
-                         breaks = scales::pretty_breaks(n = 8),
-                         limits = c(y_min, y_max)) + # Apply quantile limits
+                         breaks = scales::pretty_breaks(n = 8)) + # Removed limits
       ggtitle('Effective Mill Rate under Progressive Tax',
               paste0('vs flat ', round(flat_mill_rate_val * mill_multiplier, 2), ' mill')) +
       theme_minimal() +
@@ -215,7 +205,7 @@ server <- function(input, output) {
     gg_hist_x <- ggplot(data, aes(x = appraised_value)) +
       geom_histogram(binwidth = (max(data$appraised_value) - min(data$appraised_value)) / 50, # Dynamic binwidth
                      fill = "lightblue", color = "darkblue", alpha = 0.7) +
-      scale_x_continuous(limits = c(x_min, x_max)) + # Apply quantile limits to histogram too
+      scale_x_continuous() + # Removed limits
       theme_void() +
       theme(
         axis.text.x = element_blank(),
@@ -236,24 +226,11 @@ server <- function(input, output) {
     # Access the reactive dataframe for plots
     data <- reactive_plot_df() %>%
       arrange(appraised_value) %>%
-      # NEW: Filter out NA/NaN values in the relevant columns before plotting
+      # Filter out NA/NaN values in the relevant columns before plotting
       filter(!is.na(progressive_taxes), !is.nan(progressive_taxes),
              !is.na(taxes_at_flat_mill), !is.nan(taxes_at_flat_mill),
              !is.na(appraised_value), !is.nan(appraised_value))
     req(nrow(data) > 0)
-    
-    # Calculate x-axis limits based on quantiles
-    x_min <- quantile(data$appraised_value, 0.025)
-    x_max <- quantile(data$appraised_value, 0.975)
-    
-    # Prepare data for y-axis quantile calculation
-    y_data_for_quantiles <- data %>%
-      select(progressive_taxes, taxes_at_flat_mill) %>%
-      pivot_longer(cols = everything(), names_to = "tax_type", values_to = "taxes_due")
-    
-    # Calculate y-axis limits based on quantiles
-    y_min <- quantile(y_data_for_quantiles$taxes_due, 0.025)
-    y_max <- quantile(y_data_for_quantiles$taxes_due, 0.975)
     
     # Main plot (line only - removed geom_point)
     gg_main <- data %>%
@@ -265,11 +242,9 @@ server <- function(input, output) {
                          labels = c("progressive_taxes" = "Progressive Tax", "taxes_at_flat_mill" = "Flat Mill Tax")) +
       xlab('Appraised Value ($)') +
       ylab('Taxes due ($)') +
-      scale_x_continuous(labels = scales::dollar_format(), breaks = scales::pretty_breaks(n = 8),
-                         limits = c(x_min, x_max)) + # Apply quantile limits
+      scale_x_continuous(labels = scales::dollar_format(), breaks = scales::pretty_breaks(n = 8)) + # Removed limits
       scale_y_continuous(labels = scales::dollar_format(), # Format as dollar
-                         breaks = scales::pretty_breaks(n = 8),
-                         limits = c(y_min, y_max)) + # Apply quantile limits
+                         breaks = scales::pretty_breaks(n = 8)) + # Removed limits
       ggtitle('Taxes due',
               paste0('comparing progressive tax with ', round(flat_mill_rate_val * mill_multiplier, 2), ' mill')) +
       theme_minimal() +
@@ -287,7 +262,7 @@ server <- function(input, output) {
     gg_hist_x <- ggplot(data, aes(x = appraised_value)) +
       geom_histogram(binwidth = (max(data$appraised_value) - min(data$appraised_value)) / 50,
                      fill = "lightblue", color = "darkblue", alpha = 0.7) +
-      scale_x_continuous(limits = c(x_min, x_max)) + # Apply quantile limits to histogram too
+      scale_x_continuous() + # Removed limits
       theme_void() +
       theme(
         axis.text.x = element_blank(),
@@ -308,18 +283,10 @@ server <- function(input, output) {
     # Access the reactive dataframe for plots
     data <- reactive_plot_df() %>%
       arrange(appraised_value) %>%
-      # NEW: Filter out NA/NaN values in the relevant columns before plotting
+      # Filter out NA/NaN values in the relevant columns before plotting
       filter(!is.na(tax_savings), !is.nan(tax_savings),
              !is.na(appraised_value), !is.nan(appraised_value))
     req(nrow(data) > 0)
-    
-    # Calculate x-axis limits based on quantiles
-    x_min <- quantile(data$appraised_value, 0.025)
-    x_max <- quantile(data$appraised_value, 0.975)
-    
-    # Calculate y-axis limits based on quantiles
-    y_min <- quantile(data$tax_savings, 0.025)
-    y_max <- quantile(data$tax_savings, 0.975)
     
     # Main plot (line only - removed geom_point)
     gg_main <- ggplot(data, aes(x = appraised_value, y = tax_savings)) +
@@ -327,11 +294,9 @@ server <- function(input, output) {
       xlab('Appraised Value ($)') +
       ylab('Change in taxes (Progressive - Flat) ($)') +
       geom_hline(yintercept = 0, lty = 2, color = 'grey', linewidth = 1) +
-      scale_x_continuous(labels = scales::dollar_format(), breaks = scales::pretty_breaks(n = 8),
-                         limits = c(x_min, x_max)) + # Apply quantile limits
+      scale_x_continuous(labels = scales::dollar_format(), breaks = scales::pretty_breaks(n = 8)) + # Removed limits
       scale_y_continuous(labels = scales::dollar_format(), # Format as dollar
-                         breaks = scales::pretty_breaks(n = 8),
-                         limits = c(y_min, y_max)) + # Apply quantile limits
+                         breaks = scales::pretty_breaks(n = 8)) + # Removed limits
       ggtitle('Change in Taxes (Progressive vs. Flat)') +
       theme_minimal() +
       theme(
@@ -348,7 +313,7 @@ server <- function(input, output) {
     gg_hist_x <- ggplot(data, aes(x = appraised_value)) +
       geom_histogram(binwidth = (max(data$appraised_value) - min(data$appraised_value)) / 50,
                      fill = "lightcoral", color = "darkred", alpha = 0.7) +
-      scale_x_continuous(limits = c(x_min, x_max)) + # Apply quantile limits to histogram too
+      scale_x_continuous() + # Removed limits
       theme_void() +
       theme(
         axis.text.x = element_blank(),
