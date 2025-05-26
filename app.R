@@ -10,6 +10,15 @@ ui <- fluidPage(
   # Application title
   titlePanel("Progressive Property Taxation Model"),
   
+  # Overall App Description
+  fluidRow(
+    column(12,
+           p("This application models a hypothetical progressive property taxation system, comparing it to a traditional flat mill rate system. It uses a **simulated dataset** based on hypothetical property values from Stafford, CT, to illustrate the potential impact on different home values."), # Emphasized "simulated dataset"
+           p("The goal is to demonstrate how a progressive tax structure could shift the tax burden while maintaining overall revenue neutrality for the municipality. Explore the impact by adjusting the parameter below and observing the changes in the plots and table.")
+    )
+  ),
+  hr(), # Separator
+  
   # Sidebar with a slider input for the beta parameter
   sidebarLayout(
     sidebarPanel(
@@ -20,19 +29,37 @@ ui <- fluidPage(
                   value = 1,
                   step = 0.1),
       hr(),
-      p("Adjust the beta parameter to see how it affects the progressive tax system's impact on different home values."),
-      p("A higher beta value generally increases the progressive nature of the tax.")
+      p(strong("How the Beta Parameter Works:")),
+      p("This parameter controls the 'progressivity' of the tax system. A higher beta value increases the effective mill rate more steeply for higher-valued properties, thereby shifting more of the tax burden towards them. Conversely, lower beta values (approaching 0) make the system behave more like a traditional flat tax."),
+      p("Adjust the slider to see how different levels of progressivity affect tax outcomes.")
     ),
     
     # Show plots and table
     mainPanel(
+      # Description for Mill Rate Plot
+      p(strong("Effective Mill Rate under Progressive Tax:")),
+      p("This plot illustrates how the effective mill rate (taxes due per $1,000 of assessed value) changes with a property's appraised value under the progressive model (blue line) compared to the current flat mill rate (red dashed line). Observe how the blue line's curve changes with the beta parameter."),
       h3("Effective Mill Rate under Progressive Tax"),
       plotOutput("millRatePlot"),
+      hr(), # Separator
+      
+      # Description for Taxes Due Comparison Plot
+      p(strong("Taxes Due Comparison:")),
+      p("This plot shows the total annual taxes due for properties across different appraised values, comparing the progressive tax model (blue line) with the current flat mill rate model (red line). Notice how the progressive tax can be lower for smaller homes and higher for larger ones, while ensuring the town collects the same total revenue."),
       h3("Taxes Due Comparison"),
       plotOutput("taxesDuePlot"),
+      hr(), # Separator
+      
+      # Description for Tax Savings Plot
+      p(strong("Change in Taxes (Progressive vs. Flat):")),
+      p("This plot highlights the net difference in taxes (Progressive Tax - Flat Mill Tax) for properties across the value spectrum. A negative value indicates tax savings under the progressive system, while a positive value means higher taxes compared to the flat rate. The point where the line crosses zero indicates the property value at which taxes are approximately the same under both systems."),
       h3("Change in Taxes (Progressive vs. Flat)"),
       plotOutput("taxSavingsPlot"),
-      hr(), # Separator for the table
+      hr(), # Separator
+      
+      # Description for Summary Table
+      p(strong("Taxation Summary for Common Home Valuations:")),
+      p("The table below provides a detailed summary of taxes for specific common property valuations. This allows for a direct numerical comparison of annual taxes and the tax increase/decrease under the traditional flat mill rates versus the proposed progressive system."),
       h3("Taxation Summary for Common Home Valuations"),
       tableOutput("tax_summary_table")
     )
@@ -290,7 +317,7 @@ server <- function(input, output) {
     
     # Main plot (line only - removed geom_point)
     gg_main <- ggplot(data, aes(x = appraised_value, y = tax_savings)) +
-      geom_line(linewidth = 1, color = "darkgreen") + # Removed geom_point()
+      geom_line(linewidth = 1, color = "darkgreen") +
       xlab('Appraised Value ($)') +
       ylab('Change in taxes (Progressive - Flat) ($)') +
       geom_hline(yintercept = 0, lty = 2, color = 'grey', linewidth = 1) +
@@ -342,6 +369,7 @@ server <- function(input, output) {
         `Annual Taxes @ Mill Rate 25-26 (38.71)` = taxes_25_26,
         `Tax Increase (2024-25 to 2025-26)` = increase_fixed_mill,
         `Annual Taxes @ Progressive Mill Rate 25-26` = progressive_taxes,
+        `Progressive Mill Rate 25-26` = progressive_mill_rate, # NEW COLUMN
         `Annual Tax Difference (Progressive vs. Flat 25-26)` = tax_savings
       ) %>%
       mutate(
@@ -351,6 +379,7 @@ server <- function(input, output) {
         `Annual Taxes @ Mill Rate 25-26 (38.71)` = scales::dollar(`Annual Taxes @ Mill Rate 25-26 (38.71)`, accuracy = 0.01),
         `Tax Increase (2024-25 to 2025-26)` = scales::dollar(`Tax Increase (2024-25 to 2025-26)`, accuracy = 0.01),
         `Annual Taxes @ Progressive Mill Rate 25-26` = scales::dollar(`Annual Taxes @ Progressive Mill Rate 25-26`, accuracy = 0.01),
+        `Progressive Mill Rate 25-26` = scales::number(`Progressive Mill Rate 25-26`, accuracy = 0.01), # Format as number with 2 decimal places
         `Annual Tax Difference (Progressive vs. Flat 25-26)` = scales::dollar(`Annual Tax Difference (Progressive vs. Flat 25-26)`, accuracy = 0.01)
       )
   }, digits = 2)
