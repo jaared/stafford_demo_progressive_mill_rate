@@ -2,7 +2,8 @@
 
 library(shiny)
 library(tidyverse)
-library(ggExtra) # For marginal histograms
+library(scales)  # For dollar formatting in the table
+library(patchwork) # For combining ggplot objects
 
 # Define UI for application
 ui <- fluidPage(
@@ -14,23 +15,26 @@ ui <- fluidPage(
     sidebarPanel(
       sliderInput("beta_param",
                   "Log Function Beta Parameter:",
-                  min = -5,
-                  max = 5,
-                  value = 0,
+                  min = 0,
+                  max = 10,
+                  value = 1,
                   step = 0.1),
       hr(),
       p("Adjust the beta parameter to see how it affects the progressive tax system's impact on different home values."),
       p("A higher beta value generally increases the progressive nature of the tax.")
     ),
     
-    # Show a plot of the generated distribution
+    # Show plots and table
     mainPanel(
       h3("Effective Mill Rate under Progressive Tax"),
       plotOutput("millRatePlot"),
       h3("Taxes Due Comparison"),
       plotOutput("taxesDuePlot"),
       h3("Change in Taxes (Progressive vs. Flat)"),
-      plotOutput("taxSavingsPlot")
+      plotOutput("taxSavingsPlot"),
+      hr(), # Separator for the table
+      h3("Taxation Summary for Common Home Valuations"),
+      tableOutput("tax_summary_table")
     )
   )
 )
@@ -39,128 +43,291 @@ ui <- fluidPage(
 server <- function(input, output) {
   
   # Define helper functions within the server scope but outside reactive expressions.
-  # These functions will be accessible by any reactive or output within this server instance.
-  
-  # Function to calculate the progressive term for a given home tax value and beta
-  # This encapsulates: home_tax_value * (log(home_tax_value) + beta_param)
-  calculate_progressive_term <- function(home_tax_value, beta_param) {
-    home_tax_value * (log(home_tax_value, exp(beta_param)))
+  # Functions now explicitly use 'assessed_value' for clarity
+  calculate_progressive_term <- function(assessed_value, beta_param) {
+    # Adding +1 to assessed_value inside log to avoid log(0) and ensure positive log results.
+    # beta_param now acts as an exponent, directly controlling the steepness of progressivity.
+    assessed_value * (log(assessed_value + 1)) ^ beta_param
   }
   
-  # Function to calculate the adjustment term for the progressive tax
-  # This ensures the total revenue target is met.
-  f_progressive_adjustment <- function(home_tax_value_vector, target_revenue, beta_param) {
-    # Sum of the progressive terms for all homes, used in the denominator
-    sum_of_progressive_terms <- sum(calculate_progressive_term(home_tax_value_vector, beta_param))
+  f_progressive_adjustment <- function(assessed_value_vector, target_revenue, beta_param) {
+    sum_of_progressive_terms <- sum(calculate_progressive_term(assessed_value_vector, beta_param))
+    if (sum_of_progressive_terms == 0) {
+      return(1e-9) # Return a very small number to avoid division by zero
+    }
     target_revenue / sum_of_progressive_terms
   }
   
+  # --- Model parameters ---
+  target_revenue <- 34412649
+  mill_multiplier <- 1000
   
-  # Reactive expression to perform calculations based on input$beta_param
-  tax_data <- reactive({
-    beta_val <- input$beta_param # Get the beta value from the slider
+  # Fixed mill rates for comparison
+  mill_rate_24_25 <- 38.59
+  mill_rate_25_26 <- 38.71
+  
+  # --- Data Import ---
+  # Read data from CSV file
+  # Assuming 'fake_stafford_ct_property_values.csv' is in the same directory as app.R
+  stafford_data_raw <- read_csv(file.path('data', 'fake_stafford_ct_property_values.csv'), show_col_types = FALSE)
+  
+  # Calculate tax_valuation_ratio from imported data
+  tax_valuation_ratio <- sum(stafford_data_raw$Assessed_Value) / sum(stafford_data_raw$Appraised_Value)
+  
+  # Initial static dataframe for PLOTTING (base data from imported values)
+  # Uses 'appraised_value' for plotting x-axis and 'assessed_value' for calculations
+  initial_plot_df <- stafford_data_raw %>%
+    rename(appraised_value = Appraised_Value, assessed_value = Assessed_Value) %>%
+    arrange(appraised_value) # Ensure initial sorting by appraised_value
+  
+  # Reactive value for the PLOTTING data frame
+  reactive_plot_df <- reactiveVal(initial_plot_df)
+  
+  # Define the specific assessed values for the SUMMARY TABLE
+  table_assessed_values_base <- seq(100000, 500000, by = 5000)
+  
+  # Initial static dataframe for TABLE (base data for specific assessed values)
+  initial_table_df <- data.frame(
+    assessed_value = table_assessed_values_base # This is the Assessed Value
+  ) %>%
+    mutate(
+      # Calculate Appraised Value using the derived tax_valuation_ratio
+      appraised_value = assessed_value / tax_valuation_ratio, # Renamed from market_value
+      # Calculate taxes based on fixed mill rates
+      taxes_24_25 = assessed_value * (mill_rate_24_25 / mill_multiplier),
+      taxes_25_26 = assessed_value * (mill_rate_25_26 / mill_multiplier),
+      # Calculate increase for fixed mill rates
+      increase_fixed_mill = taxes_25_26 - taxes_24_25
+    ) %>%
+    arrange(assessed_value) # Ensure initial sorting by assessed_value
+  
+  # Reactive value for the TABLE data frame
+  reactive_table_df <- reactiveVal(initial_table_df)
+  
+  # flat_mill_rate_val now uses the specified mill_rate_25_26
+  # This serves as a reference mill rate for comparison on plots and in table.
+  flat_mill_rate_val <- mill_rate_25_26 / mill_multiplier
+  
+  
+  # Observe changes in input$beta_param and update BOTH data frames
+  observeEvent(input$beta_param, {
     
-    # Model parameters (can also be made interactive if desired)
-    households <- 4569 * 2 # * 2 to account for businesses
-    median_home_price <- 249900
-    tax_valuation <- .7
-    home_price_standard_deviation <- 35000
-    target_revenue <- 47000000
+    beta_val <- input$beta_param
     
-    set.seed(1) # Ensure reproducibility
-    home_values <- rnorm(
-      n = households,
-      mean = median_home_price,
-      sd = home_price_standard_deviation
-    )
+    # --- Update the PLOTTING data frame (for scatter plots) ---
+    current_plot_df <- initial_plot_df
     
-    df <- data.frame(home_values = home_values) %>%
-      mutate(home_tax_value = tax_valuation * home_values) %>%
-      arrange(home_values)
+    # Calculate adjustment term based on *assessed values* from imported data
+    # This ensures the total progressive tax revenue equals target_revenue from the imported grand list.
+    plot_adjustment_term <- f_progressive_adjustment(current_plot_df$assessed_value, target_revenue, beta_val)
     
-    # Calculate flat mill rate
-    flat_mill_rate <- target_revenue / sum(df$home_tax_value)
-    
-    # Calculate adjustment term using the newly defined function
-    adjustment_term <- f_progressive_adjustment(df$home_tax_value, target_revenue, beta_val)
-    
-    # Calculate progressive taxes and related metrics using the newly defined function
-    df_final <- df %>%
+    current_plot_df <- current_plot_df %>%
       mutate(
-        # Apply the beta parameter in the progressive tax calculation
-        progressive_taxes = adjustment_term * calculate_progressive_term(home_tax_value, beta_val),
-        progressive_tax_rate = progressive_taxes / home_tax_value,
-        progressive_mill_rate = 1000 * progressive_tax_rate, # Multiplied by 1000
-        taxes_at_flat_mill = home_tax_value * flat_mill_rate,
+        adjustment_term = plot_adjustment_term,
+        beta_val = beta_val) %>%
+      mutate(
+        progressive_taxes = adjustment_term * calculate_progressive_term(assessed_value, beta_val),
+        progressive_tax_rate = progressive_taxes / assessed_value,
+        progressive_mill_rate = mill_multiplier * progressive_tax_rate,
+        # taxes_at_flat_mill now uses the new flat_mill_rate_val
+        taxes_at_flat_mill = assessed_value * flat_mill_rate_val,
         tax_savings = progressive_taxes - taxes_at_flat_mill
-      )
+      ) %>%
+      arrange(appraised_value) # Ensure data is sorted after all mutations for consistent plotting
+    reactive_plot_df(current_plot_df) # Update the reactive value
     
-    list(df = df_final, flat_mill_rate = flat_mill_rate, target_revenue = target_revenue)
+    
+    # --- Update the TABLE data frame (for summary table) ---
+    current_table_df <- initial_table_df
+    
+    # IMPORTANT: Use the SAME adjustment_term calculated from the SIMULATED data
+    # to maintain consistency in overall revenue targeting.
+    table_adjustment_term <- plot_adjustment_term
+    
+    current_table_df <- current_table_df %>%
+      mutate(
+        adjustment_term = table_adjustment_term,
+        beta_val = beta_val) %>%
+      mutate(
+        progressive_taxes = adjustment_term * calculate_progressive_term(assessed_value, beta_val),
+        progressive_tax_rate = progressive_taxes / assessed_value,
+        progressive_mill_rate = mill_multiplier * progressive_tax_rate,
+        taxes_at_flat_mill = assessed_value * flat_mill_rate_val, # Re-calculate to be explicit
+        tax_savings = progressive_taxes - taxes_at_flat_mill # This is the (Progressive - Flat) from the model
+      ) %>%
+      arrange(assessed_value) # Ensure data is sorted after all mutations for consistent plotting
+    reactive_table_df(current_table_df) # Update the reactive value for the table
   })
+  
   
   # Render Plot 1: Effective Mill Rate
   output$millRatePlot <- renderPlot({
-    data <- tax_data()$df
-    flat_mill <- tax_data()$flat_mill_rate
+    # Access the reactive dataframe for plots
+    data <- reactive_plot_df() %>% arrange(appraised_value) # Ensure data is sorted for line plot
+    req(nrow(data) > 0)
     
-    gg <- ggplot(data, aes(x = home_values, y = progressive_mill_rate)) +
-      geom_line() +
-      geom_point(alpha = 0.5) +
-      xlab('Assessed home value ($)') +
-      ylab('Effective mill rate (per $1000)') +
-      geom_hline(yintercept = flat_mill * 1000, lty = 2, color = 'red') + # Multiplied by 1000
-      scale_x_continuous(labels = scales::dollar_format(), breaks = seq(0, max(data$home_values), by = 50000)) +
-      ggtitle('Effective Mill Rate under progressive tax',
-              paste0('vs flat ', round(flat_mill * 1000, 2), ' mill')) + # Multiplied by 1000
+    # Main plot (line only)
+    gg_main <- ggplot(data, aes(x = appraised_value, y = progressive_mill_rate)) +
+      geom_line(color = "steelblue", linewidth = 1.2) +
+      xlab('Appraised Value ($)') + # UPDATED X-axis label
+      ylab(paste0('Effective mill rate (per $', mill_multiplier, ')')) +
+      geom_hline(yintercept = flat_mill_rate_val * mill_multiplier, lty = 2, color = 'red', linewidth = 1) +
+      scale_x_continuous(labels = scales::dollar_format(),
+                         breaks = scales::pretty_breaks(n = 8)) +
+      ggtitle('Effective Mill Rate under Progressive Tax',
+              paste0('vs flat ', round(flat_mill_rate_val * mill_multiplier, 2), ' mill')) +
       theme_minimal() +
-      theme(axis.text.x = element_text(angle = 45, hjust = 1)) # Rotate x-axis labels for readability
+      theme(
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 10),
+        axis.title.x = element_text(size = 12, face = "bold"),
+        axis.title.y = element_text(size = 12, face = "bold"),
+        plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+        plot.subtitle = element_text(size = 12, hjust = 0.5),
+        panel.grid.minor = element_blank(),
+        plot.margin = unit(c(0.1, 0.1, 0.1, 0.1), "cm")
+      )
     
-    ggMarginal(gg, type = 'histogram', margins = 'x') # Only x-axis histogram for clarity
+    # Marginal histogram (x-axis)
+    gg_hist_x <- ggplot(data, aes(x = appraised_value)) +
+      geom_histogram(binwidth = (max(data$appraised_value) - min(data$appraised_value)) / 50, # Dynamic binwidth
+                     fill = "lightblue", color = "darkblue", alpha = 0.7) +
+      theme_void() +
+      theme(
+        axis.text.x = element_blank(),
+        axis.title.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        plot.margin = unit(c(0.1, 0.1, 0.1, 0.1), "cm")
+      )
+    
+    # Combine plots using patchwork
+    combined_plot <- gg_hist_x / gg_main +
+      plot_layout(heights = c(1, 4))
+    
+    print(combined_plot)
   })
   
   # Render Plot 2: Taxes Due Comparison
   output$taxesDuePlot <- renderPlot({
-    data <- tax_data()$df
-    flat_mill <- tax_data()$flat_mill_rate
+    # Access the reactive dataframe for plots
+    data <- reactive_plot_df() %>% arrange(appraised_value) # Ensure data is sorted for line plot
+    req(nrow(data) > 0)
     
-    gg <- data %>%
-      select(home_values, progressive_taxes, taxes_at_flat_mill) %>%
+    # Main plot (line and points)
+    gg_main <- data %>%
+      select(appraised_value, progressive_taxes, taxes_at_flat_mill) %>%
       pivot_longer(cols = c(progressive_taxes, taxes_at_flat_mill), names_to = "tax_type", values_to = "taxes_due") %>%
-      ggplot(aes(x = home_values, y = taxes_due, color = tax_type)) +
+      ggplot(aes(x = appraised_value, y = taxes_due, color = tax_type)) +
       geom_point(alpha = 0.5) +
-      geom_line() +
+      geom_line(linewidth = 1) +
       scale_color_manual(values = c("progressive_taxes" = "blue", "taxes_at_flat_mill" = "red"),
                          labels = c("progressive_taxes" = "Progressive Tax", "taxes_at_flat_mill" = "Flat Mill Tax")) +
-      xlab('Assessed home value ($)') +
+      xlab('Appraised Value ($)') + # UPDATED X-axis label
       ylab('Taxes due ($)') +
-      scale_x_continuous(labels = scales::dollar_format(), breaks = seq(0, max(data$home_values), by = 50000)) +
+      scale_x_continuous(labels = scales::dollar_format(), breaks = scales::pretty_breaks(n = 8)) +
       scale_y_continuous(labels = scales::dollar_format()) +
       ggtitle('Taxes due',
-              paste0('comparing progressive tax with ', round(flat_mill * 1000, 2), ' mill')) + # Multiplied by 1000
+              paste0('comparing progressive tax with ', round(flat_mill_rate_val * mill_multiplier, 2), ' mill')) +
       theme_minimal() +
-      theme(axis.text.x = element_text(angle = 45, hjust = 1))
+      theme(
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 10),
+        axis.title.x = element_text(size = 12, face = "bold"),
+        axis.title.y = element_text(size = 12, face = "bold"),
+        plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+        plot.subtitle = element_text(size = 12, hjust = 0.5),
+        panel.grid.minor = element_blank(),
+        plot.margin = unit(c(0.1, 0.1, 0.1, 0.1), "cm")
+      )
     
-    ggMarginal(gg, type = 'histogram', margins = 'x') # Only x-axis histogram for clarity
+    # Marginal histogram (x-axis)
+    gg_hist_x <- ggplot(data, aes(x = appraised_value)) +
+      geom_histogram(binwidth = (max(data$appraised_value) - min(data$appraised_value)) / 50,
+                     fill = "lightblue", color = "darkblue", alpha = 0.7) +
+      theme_void() +
+      theme(
+        axis.text.x = element_blank(),
+        axis.title.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        plot.margin = unit(c(0.1, 0.1, 0.1, 0.1), "cm")
+      )
+    
+    # Combine plots using patchwork
+    combined_plot <- gg_hist_x / gg_main +
+      plot_layout(heights = c(1, 4))
+    
+    print(combined_plot)
   })
   
   # Render Plot 3: Change in Taxes
   output$taxSavingsPlot <- renderPlot({
-    data <- tax_data()$df
+    # Access the reactive dataframe for plots
+    data <- reactive_plot_df() %>% arrange(appraised_value) # Ensure data is sorted for line plot
+    req(nrow(data) > 0)
     
-    gg <- ggplot(data, aes(x = home_values, y = tax_savings)) +
-      geom_line() +
-      geom_point(alpha = 0.5) +
-      xlab('Assessed home value ($)') +
+    # Main plot (line and points)
+    gg_main <- ggplot(data, aes(x = appraised_value, y = tax_savings)) +
+      geom_line(linewidth = 1, color = "darkgreen") +
+      geom_point(alpha = 0.5, color = "darkgreen") +
+      xlab('Appraised Value ($)') + # UPDATED X-axis label
       ylab('Change in taxes (Progressive - Flat) ($)') +
-      geom_hline(yintercept = 0, lty = 2, color = 'grey') +
-      scale_x_continuous(labels = scales::dollar_format(), breaks = seq(0, max(data$home_values), by = 50000)) +
+      geom_hline(yintercept = 0, lty = 2, color = 'grey', linewidth = 1) +
+      scale_x_continuous(labels = scales::dollar_format(), breaks = scales::pretty_breaks(n = 8)) +
       scale_y_continuous(labels = scales::dollar_format()) +
       ggtitle('Change in Taxes (Progressive vs. Flat)') +
       theme_minimal() +
-      theme(axis.text.x = element_text(angle = 45, hjust = 1))
+      theme(
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 10),
+        axis.title.x = element_text(size = 12, face = "bold"),
+        axis.title.y = element_text(size = 12, face = "bold"),
+        plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+        plot.subtitle = element_text(size = 12, hjust = 0.5),
+        panel.grid.minor = element_blank(),
+        plot.margin = unit(c(0.1, 0.1, 0.1, 0.1), "cm")
+      )
     
-    ggMarginal(gg, type = 'histogram', margins = 'x') # Only x-axis histogram for clarity
+    # Marginal histogram (x-axis)
+    gg_hist_x <- ggplot(data, aes(x = appraised_value)) +
+      geom_histogram(binwidth = (max(data$appraised_value) - min(data$appraised_value)) / 50,
+                     fill = "lightcoral", color = "darkred", alpha = 0.7) +
+      theme_void() +
+      theme(
+        axis.text.x = element_blank(),
+        axis.title.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        plot.margin = unit(c(0.1, 0.1, 0.1, 0.1), "cm")
+      )
+    
+    # Combine plots using patchwork
+    combined_plot <- gg_hist_x / gg_main +
+      plot_layout(heights = c(1, 4))
+    
+    print(combined_plot)
   })
+  
+  # Render the summary table with updated columns
+  output$tax_summary_table <- renderTable({
+    data <- reactive_table_df() # Access the reactive dataframe for the table
+    req(nrow(data) > 0)
+    
+    data %>%
+      select(
+        `Appraised Value` = appraised_value,
+        `Assessed Value` = assessed_value,
+        `Annual Taxes @ Mill Rate 24-25 (38.59)` = taxes_24_25,
+        `Annual Taxes @ Mill Rate 25-26 (38.71)` = taxes_25_26,
+        `Tax Increase (2024-25 to 2025-26)` = increase_fixed_mill,
+        `Annual Taxes @ Progressive Mill Rate 25-26` = progressive_taxes,
+        `Annual Tax Difference (Progressive vs. Flat 25-26)` = tax_savings # Updated column name
+      ) %>%
+      mutate(
+        `Appraised Value` = scales::dollar(`Appraised Value`, accuracy = 1),
+        `Assessed Value` = scales::dollar(`Assessed Value`, accuracy = 1),
+        `Annual Taxes @ Mill Rate 24-25 (38.59)` = scales::dollar(`Annual Taxes @ Mill Rate 24-25 (38.59)`, accuracy = 0.01),
+        `Annual Taxes @ Mill Rate 25-26 (38.71)` = scales::dollar(`Annual Taxes @ Mill Rate 25-26 (38.71)`, accuracy = 0.01),
+        `Tax Increase (2024-25 to 2025-26)` = scales::dollar(`Tax Increase (2024-25 to 2025-26)`, accuracy = 0.01),
+        `Annual Taxes @ Progressive Mill Rate 25-26` = scales::dollar(`Annual Taxes @ Progressive Mill Rate 25-26`, accuracy = 0.01),
+        `Annual Tax Difference (Progressive vs. Flat 25-26)` = scales::dollar(`Annual Tax Difference (Progressive vs. Flat 25-26)`, accuracy = 0.01) # Updated column name
+      )
+  }, digits = 2)
 }
 
 # Run the application
