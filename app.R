@@ -15,7 +15,8 @@ ui <- fluidPage(
     column(12,
            p("This application models a hypothetical property taxation model, comparing it to a traditional flat mill rate system. It uses a **simulated dataset** based on hypothetical property values from Stafford, CT, to illustrate the potential impact on different home values."), # Emphasized "simulated dataset"
            p("The goal is to demonstrate how a progressive (or regressive!) tax structure could shift the tax burden while maintaining overall revenue neutrality for the municipality. Explore the impact by adjusting the parameter below and observing the changes in the plots and table."),
-           p("Potential market impacts (speculative): Increasing the tax rate by an arbitrary percent (say .01%) will decrease the property value by some multiple (e.g.: 3 * .01% = .03%). For a property worth $1,000,000, a $100 increase in taxes would reduce the market value to perhaps $999,700. Similarly, a property worth $100,000 having it's property tax decreased by $10 would increase it's value to $100,030.")
+           p("Potential market impacts (speculative): Increasing the tax rate by an arbitrary percent (say .01%) will decrease the property value by some multiple (e.g.: 3 * .01% = .03%). For a property worth $1,000,000, a $100 increase in taxes would reduce the market value to perhaps $999,700. Similarly, a property worth $100,000 having it's property tax decreased by $10 would increase it's value to $100,030."),
+           p("A taxation model should be part of a comprehensive strategy for town management that includes considerations for growth, incentives to work, and other factors related to town well-being. This is a demonstration of only taxation.")
     )
   ),
   hr(), # Separator
