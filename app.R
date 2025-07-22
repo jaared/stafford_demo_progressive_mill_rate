@@ -13,9 +13,9 @@ ui <- fluidPage(
   # Overall App Description
   fluidRow(
     column(12,
-           p("This application models a hypothetical property taxation model, comparing it to a traditional flat mill rate system. It uses a **simulated dataset** based on hypothetical property values from Stafford, CT, to illustrate the potential impact on different home values."), # Emphasized "simulated dataset"
-           p("The goal is to demonstrate how a progressive (or regressive!) tax structure could shift the tax burden while maintaining overall revenue neutrality for the municipality. Explore the impact by adjusting the parameter below and observing the changes in the plots and table."),
-           p("Potential market impacts (speculative): Increasing the tax rate by an arbitrary percent (say .01%) will decrease the property value by some multiple (e.g.: 3 * .01% = .03%). For a property worth $1,000,000, a $100 increase in taxes would reduce the market value to perhaps $999,700. Similarly, a property worth $100,000 having it's property tax decreased by $10 would increase it's value to $100,030."),
+           p("This application models a hypothetical property taxation model, comparing it to a traditional flat mill rate system. It uses a **simulated dataset** based on hypothetical property values from Stafford, CT to illustrate the potential impact on taxation associated with different home values. The general idea is that progressive taxation lowers taxes on the cheaper properties and raises taxes on more expensive properties. For regressive taxation (also possible here), the reverse is true. This allows us to shift tax burden to align with town objectives. "), # Emphasized "simulated dataset"
+           p("This page demonstrates how a progressive (or regressive!) tax structure could shift the tax burden **while maintaining overall revenue neutrality** for the municipality. Explore the impact by adjusting the parameter below and observing the changes in the plots and table."),
+           p("Potential market impacts (speculative): Increasing the tax rate by an arbitrary percent (say .01%) will decrease the property value by some multiple (e.g.: 3 * .01% = .03%). For a property worth $1,000,000, a $100 increase in taxes would reduce the market value to perhaps $999,700. Similarly, a property worth $100,000 having it's property tax decreased by $10 would increase it's value to $100,030. As a result, a progressive tax system will decrease the range of home values, and a regressive tax system will increase the range of home values."),
            p("A taxation model should be part of a comprehensive strategy for town management that includes considerations for growth, incentives to work, and other factors related to town well-being. This is a demonstration of only taxation.")
     )
   ),
@@ -32,7 +32,7 @@ ui <- fluidPage(
                   step = 0.05),
       hr(),
       p(strong("How the Beta Parameter Works:")),
-      p("This parameter controls the 'progressivity (or regressivity!)' of the tax system. A higher beta value increases the effective mill rate more steeply for higher-valued properties, thereby shifting more of the tax burden towards them. Conversely, lower beta values make the system behave more like a regressive tax system."),
+      p("This parameter controls the 'progressivity (or regressivity!)' of the tax system. A higher beta value increases the effective mill rate more steeply for higher-valued properties, thereby shifting more of the tax burden towards them. Conversely, lower beta values make the system behave more like a regressive tax system. "),
       p("Adjust the slider to explore different levels of regressivity or progressivity on tax outcomes.")
     ),
     
